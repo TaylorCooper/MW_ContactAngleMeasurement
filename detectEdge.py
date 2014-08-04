@@ -92,81 +92,6 @@ def getContactAngle(inputImg, outPath, ident, roi, debug=True):
     return caDeg # Return contact angle in degrees
 
 
-def videoToImages(videoPath, outPath):
-    """Works will split every 10th image out and save it to the outPath.
-
-    Ideally this would be done in a for loop for some reason it doesn't work.
-    """
-    cap = cv2.VideoCapture(videoPath)
-    
-    print cap.isOpened()
-    count = 0
-    
-    while cap.isOpened():
-        ret, frame = cap.read()
-        print ret
-        
-        if ret and (count % 10) == 0:
-            imgNum = string.zfill(count,3)
-            name = outputPath + "contactAnglePicture-" + imgNum + ".png"
-            cv2.imwrite(name, frame)        
-        
-        if count > MAX_VIDEO_SIZE or ret == False:
-            print count
-            break
-        
-        count += 1
-
-    
-def videoToContactAngles(videoPath, outPath, N, roi):
-    """Analyzes every Nth image in a video with getContactAngle()
-    
-    Input:
-    videoPath = a string, path of video to be analyzed
-    outPath = a string, working directory
-    N = a positive integer, images divisable by it will be analyzed
-    
-    Output:
-    plot of CA vs image number
-    if debug is enabled the houghlines plots will be output in the working dir
-    """
-    cap = cv2.VideoCapture(videoPath)
-    
-    if N <= 0:
-        print "N must be an integer >0."
-        return None
-    
-    count = 0
-    contactAngles = []
-    frameNumbers = []
-    
-    while True:
-        ret, frame = cap.read()
-        
-        # If frameNum/N=0 is returned do analysis
-        if ret and (count % N) == 0:          
-                        
-            imgNum = string.zfill(count,4)
-            print ret, imgNum
-            
-            angle = getContactAngle(frame, outPath, imgNum, roi)
-            if angle:
-                contactAngles.append(angle)
-                frameNumbers.append(float(count))
-                    
-        if count > MAX_VIDEO_SIZE or ret == False:
-            print count
-            break
-        
-        count += 1
-
-    print frameNumbers
-    print contactAngles
-    clf() # Not certain what is requiring me to clear figure
-    plot(arange(len(contactAngles)), contactAngles)
-    savefig(outPath+"\\contactAngles_001.png")
-
-
 def videoToFilteredVideo(videoPath, outPath, N, deg, roi):
     """Filters and saves every Nth image in a video with getContactAngle()
     
@@ -195,13 +120,12 @@ def videoToFilteredVideo(videoPath, outPath, N, deg, roi):
     # Open output video    
     height = roi[1]-roi[0]
     width = roi[3]-roi[2]
-    outName = outPath + '\\_filter.avi'
+    outName = outPath + 'Filtered.avi'
     
     # Output Filename, compression, fps, (frame_W, frame_H)
     
-    # Possible compression formats: M J P G, P I M 1, I 4 2 0
-    # Translation: Mjpg, i dont know, uncompressed avi
-    video = cv2.VideoWriter(outName, cv2.cv.CV_FOURCC('P','I','M','1')
+    # See notes below for possible compression formats
+    video = cv2.VideoWriter(outName, cv2.cv.CV_FOURCC('I','4','2','0')
                             ,25,(width,height))
 
     # Start reading input video
@@ -221,7 +145,6 @@ def videoToFilteredVideo(videoPath, outPath, N, deg, roi):
             # Rotate and crop image based on Deg / Roi
             img = cv2.warpAffine(frame,rot_Matrx,(cols,rows))            
             img_Nom = img[roi[0]:roi[1],roi[2]:roi[3]]  # vert:vert, hor:hor         
-
             
             # Gray scale and apply a mask to remove unecessary points
             img = cv2.cvtColor(img_Nom,cv2.COLOR_BGR2GRAY) # convert to GS
@@ -234,13 +157,12 @@ def videoToFilteredVideo(videoPath, outPath, N, deg, roi):
             # Adjust contrast... this is difficult to get right
             img = cv2.add(img,90)
             r,img = cv2.threshold(img,160,255,cv2.THRESH_BINARY)
-#            img = cv2.equalizeHist(img)
             
             # Convert Nom to grayscale so it can output in the same png
             img_Nom = cv2.cvtColor(img_Nom,cv2.COLOR_BGR2GRAY) # convert to GS 
             img_Debug = np.hstack((img,img_Nom)) # Side by side for contrast          
 
-            cv2.imwrite(outPath+'\\'+imgNum+'.png', img_Debug)
+            cv2.imwrite(outPath+imgNum+'.png', img_Debug)
 
             # Convert back to BGR for video codec
             img = cv2.cvtColor(img,cv2.COLOR_GRAY2BGR) # convert to GS  
@@ -256,7 +178,7 @@ def videoToFilteredVideo(videoPath, outPath, N, deg, roi):
     video.release()
     
 
-def createVideo(outPath, roi):
+def osWalk(outPath, roi):
     """ Use os.walk to do stuff
     """
     height = roi[1]-roi[0]
@@ -267,7 +189,6 @@ def createVideo(outPath, roi):
     # Translation: Mjpg, i dont know, uncompressed avi
     video = cv2.VideoWriter(outName, cv2.cv.CV_FOURCC('P','I','M','1'),
                             25,(width,height))
-                            
 
     for (root, subFolders, files) in os.walk(outPath):
     
@@ -281,64 +202,21 @@ def createVideo(outPath, roi):
     #cv2.destroyAllWindows()
     video.release()
 
-###            
-### Basic functionality            
-###
-#path = "C:\\Users\Taylor\\Documents\\GitHub\\MW_ContactAngleMeasurement"
-#pathCA = path + "\\contact_angle"
-#pathHough = path + "\\houghoutputs"
-#print pathCA
-#print pathHough
-#roi = (450,600,700,800)
-#measureMultipleImages(pathCA, pathHough, roi)
-            
-###
-### Basic Spliting video to images
-###
-#inputVid = "C:\\Users\\Taylor\\Documents\\GitHub\\MW_ContactAngleMeasurement\\\
-#drop\\drop.avi"
-#outputPath = "C:\\Users\\Taylor\\Documents\\GitHub\\MW_ContactAngleMeasurement\
-#\\drop\\"
-#print inputVid
-#print outputPath
-#videoToImages(inputVid, outputPath)
-
-###
-### Combined, split video and analyze it
-###
-#inputVid="D:\\GitHub\\20140725_GizmoDry_Analysis\\2014_07_28\\\
-#20140728-14_30_42-CA1_M01SS-27.MOV"
-#outputPath="D:\\GitHub\\20140725_GizmoDry_Analysis\\2014_07_28\Work"
-##roi = (900,950,800,1200)  # xmin:xmax (vertical), ymin:ymax (horizontal)
-#roi = (900,935,900,975)  # xmin:xmax (vertical), ymin:ymax (horizontal)
-#N = 10
-#print inputVid
-#print outputPath
-#videoToContactAngles(inputVid, outputPath, N, roi)
-
 # Filter video and resave it
-inputVid="D:\\GitHub\\20140725_GizmoDry_Analysis\\2014_07_28\\\
-20140728-14_30_42-CA1_M01SS-27.MOV"
-outputPath="D:\\GitHub\\20140725_GizmoDry_Analysis\\2014_07_28\Work"
+inputVid="D:\\GitHub\\A2_work\\20140728-14_30_42-CA1_M01SS-27.MOV"
+outputPath="D:\\GitHub\\A2_work\\Work\\"
 rotation = 2 # degrees
 roi = (850,1080,800,1175)  # xmin:xmax (vert, row), ymin:ymax (horz, col)
 N = 10
 print inputVid
 print outputPath
-#createVideo(outputPath, roi)
 videoToFilteredVideo(inputVid, outputPath, N, rotation, roi)
-
-
-#inputVid = "D:\\Dropbox\\Clients\\AFCC\\Projects\\Metal FSU\\\
-#A2 - Material Characterization\\TEST DATA\TEST CA1\\20140725_GizmoDry_Analysis\
-#\\2014_07_28\\20140728-14_30_42-CA1_M01SS-27.MOV"
-#outputPath = "D:\\Dropbox\\Clients\\AFCC\\Projects\\Metal FSU\\\
-#A2 - Material Characterization\\TEST DATA\TEST CA1\\20140725_GizmoDry_Analysis\
-#\\2014_07_28\\work"
 
 
 """
 NOTES:
+
+roi has a minimum size: opencv video.write seems to have a minimum image size
 
 FOURCC CODECs
 int fourCC_code = CV_FOURCC('M','J','P','G');	// M-JPEG codec (may not 
@@ -356,43 +234,4 @@ CMP_GE src1 is greater than or equal to src2.
 CMP_LT src1 is less than src2.
 CMP_LE src1 is less than or equal to src2.
 CMP_NE src1 is unequal to src2.
-
-Potentially useful code for making a video from images,  video it generates
-are not viable unfortunately.
-
-img1 = cv2.imread(pathCA+"\\goodVid-001.png")
-#img2 = cv2.imread(pathCA+"\\goodVid-002.png")
-#img3 = cv2.imread(pathCA+"\\goodVid-003.png")
-#video.write(img1)
-#video.write(img2)
-#video.write(img3)
-
-height, width, layers = img1.shape
-
-print height, width
-
-#video = cv2.VideoWriter(pathCA+"\\goodVid.avi",-1,1,(width,height))
-#
-#for root, subFolders, files in os.walk(pathCA):
-#    
-#    #Second condition forces this to run in only the index dir
-#    for i, item in enumerate(files):
-#        if '.png' in item:
-#            img = cv2.imread(pathCA+"\\"+item)
-#            print item
-#            video.write(img)
-#        
-#cv2.destroyAllWindows()
-#video.release()
-
-    
-    Alternatives to cv2.VideoCaptrure:
-    
-    1) Extracting images from a video:
-    ffmpeg -i foo.avi -r 1 -s WxH -f image2 foo-%03d.jpeg
-    
-    2) Creating images from a video
-    ffmpeg -f image2 -i foo-%03d.jpeg -r 12 -s WxH foo.avi
-    
-    Then call these with os.system()
 """
