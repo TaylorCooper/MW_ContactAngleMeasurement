@@ -32,15 +32,17 @@
      --------------------------------------------------------------
 """
             
-var = dict(
-    PATH = 'D:\\GitHub\\workspace\\A2_work\\20140728-14_30_42-CA1_M01SS-27.MOV',
-    VSF = 80,
-    VEF = 660,
-    N = 10,
-    R = 2,
-    ROI = (850,1080,800,1175), # row_min, row_max, col_min, col_max
-    MASK = (90,280,255), # col_min, col_max, value outside mask
-    BR = 90,
-    TH = 160,
-    BED = 150, # row (0 is at top of image)
-)
+params = {
+    'PATH' : 'D:\\GitHub\\workspace\\A2_work\\SampleAnalysis\\',
+    'VSF' : 80,
+    'VEF' : 660,
+    'N' : 10,
+    'R' : 2,
+    'ROI' : (850,1080,800,1175), # row_min, row_max, col_min, col_max
+    'MASK' : (90,280,255), # col_min, col_max, value outside mask
+    'BR' : 90,
+    'TH' : 160,
+    'BED' : 150, # row (0 is at top of image)
+    'W' : vars['ROI'][3]-vars['ROI'][2],
+    'H' : vars['ROI'][1]-vars['ROI'][0]
+}
