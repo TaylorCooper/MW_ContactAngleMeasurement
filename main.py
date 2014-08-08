@@ -22,11 +22,11 @@
         BED - bubble edge depth - (BED) Interface between bubble and surface
                         
     Outputs Normal Mode:
-        .txt containing frameNumber, leftCA, rightCA, radius
+        .txt containing frameNumber, leftCA, rightCA, diameter
     Outputs Debug Mode:
         .png comparing filtered and unfiltered image
         .png of fits and points fitted
-        .txt containing frameNumber, leftCA, rightCA, radius
+        .txt containing frameNumber, leftCA, rightCA, diameter
     Dependencies:
         numpy, cv2, os, string, pylab, shutil, csv
     Limitations:
@@ -52,6 +52,10 @@
                 22.40,41,42,43,46 goes over 90
                 31,32,56 video length
                 40 N resolution may not be fine enough to see receding CA
+        
+        Widen mask
+        Start syg find at like 90 or 100
+        Set up bed to run before analysis
         
         Rename data.png to filename / make it first file
         Overlay plots on image
@@ -80,19 +84,33 @@ MAX_VIDEO_SIZE = 1000 #Frames
 # Config file variables
 vars = {
     # Always provide the trailing \\ for 'PATH' if it's a filepath
-    'PATH' : 'D:\\GitHub\\AFCC Metal FSU Testing 2014\\A2\\',
+    'PATH' : 'D:\\GitHub\\AFCC Metal FSU Testing 2014\\20140807_Dataset\\CA8\\2014_08_05\\',
     'VSF' : 50,
     'VEF' : 1500,
     'N' : 10,
     'R' : 2,
     'ROI' : (750,1080,800,1175), # row_min, row_max, col_min, col_max
-    'MASK' : (90,280,255), # col_min, col_max, value outside mask
+    'MASK' : (30,340,255), # col_min, col_max, value outside mask
     'BR' : 90,
     'TH' : 180,
     'DPI' : 100, # plot quality (lower = faster
-    'DEBUG' : True,
-    'RESETBED' : False
+    'DEBUG' : True, # Plots and saves images
+    'RESETBED' : True, # Will ignore _BED if present
+    'ASSIGNBEDS' : True, # Will ignore analysis and assign beds, responds to RESETBED
+    'REMOVEBEDS' : False, # Will ignore assignBeds and analysis and remove _BED
 }
+
+headers = [
+          'Filename',
+          'FolderID',
+          'FabID',
+          'Sample#',
+          'Region',
+          'AdvCALeft(deg)',
+          'AdvCARight(deg)',
+          'MaxDiameter(px)',
+          'BED(px)',       
+          ]
 
 class getContactAngle():
     """
@@ -101,7 +119,7 @@ class getContactAngle():
     Output: Filtered and contact angle plots
     """
     
-    def __init__(self, configurables):
+    def __init__(self, configurables, masterLogHeaders, assignBeds=False):
         """ Initialize getContactAngle.
         Input:  configFile parameters
         Output:  None
@@ -118,15 +136,19 @@ class getContactAngle():
         self.br = configurables['BR']
         self.th = configurables['TH']
         self.dpi = configurables['DPI']
-
         self.debug = configurables['DEBUG']
         self.resetbed = configurables['RESETBED']
+        self.assignBeds = configurables['ASSIGNBEDS']
+        self.removeBeds = configurables['REMOVEBEDS']
+        self.headers = masterLogHeaders
         
         # Internal parameters
         self.workDir = None
         self.vidPath = None
-        self.sygOffset = 6
+        self.syringMinPos = 120
+        self.sygOffset = 6 
         self.bubMax = 200
+        self.derivOffset = 10 # Don't take derivative right at edge
         self.minFitPoints = 4
         self.w = self.roi[3] - self.roi[2]
         self.h = self.roi[1] - self.roi[0]
@@ -134,14 +156,15 @@ class getContactAngle():
         # Human input parameters, warning this value changes with the roi
         self.bed = None
 
-    def findBubbleEdge(self, arr):
+    def findBubbleEdge(self, arr, useBed=True):
         """ Find the top edge of a goniometer bubble.
         Input:  Transposed numpy array of filtered image.
         Output:  Returns false if no edge found, else edge position.
         """
         # j is position in arr, pxVal is value of the pixel
-        for j,pxVal in enumerate(np.nditer(arr)):
-            if j > self.bed: # if no point is found before BED return false
+        # cannot used np.iternd here it only iterates forward
+        for j,pxVal in enumerate(arr):
+            if j > self.bed and useBed: # if no point is found before BED return false
                 return False 
             if pxVal < 30: # if a point is found return that points y value
                 return j
@@ -156,6 +179,7 @@ class getContactAngle():
         Returns left, right contact angle or none.
         """
     
+        # Warning: xLeft = xFromLeft etc. in this function
         makePlot = False
         caL = None # left contact angle
         caR = None # right contact angle
@@ -168,30 +192,36 @@ class getContactAngle():
             xLeft = np.asarray(xLeft)
             yLeft = np.asarray(yLeft)
         
-            # Fit data set with 3rd degree polynomial
-            coefLeft = np.polyfit(xLeft,yLeft,3)
+            # Fit data set with 5th degree polynomial
+            coefLeft = np.polyfit(xLeft,yLeft,5)
             polyLeft = np.poly1d(coefLeft)
                
             # Get values to plot fit, assume min and max locations
-            xsLeft = np.arange(xLeft[-1], xLeft[0], 0.1)
+            xsLeft = np.arange(xLeft[0], xLeft[-1], 0.1)
             ysLeft = polyLeft(xsLeft)
         
             # Get derivative @ left most point and values to plot derivative
+            # Derivative calculated up from edge, images too noisy for
+            # calculation right at self.bed
             derivLeft = polyLeft.deriv()
-            mL = derivLeft(xLeft[-1])
+            # Invert because rotating graph
+            mL = 1/derivLeft(xLeft[0]+self.derivOffset) 
+
             
             if self.debug:
                 # Get CA lines to plot
-                bL = yLeft[-1] - mL*xLeft[-1]
+                bL = xLeft[0] - mL*yLeft[0] # Also inverted
                 x1L,y1L = (-1000, mL*-1000+bL)
                 x2L,y2L = (1000, mL*1000+bL)
                 
                 # Plot lines
                 plot((x1L,x2L),(y1L,y2L),'b')
-                plot(xLeft,yLeft,'r.')
-                plot(xsLeft, ysLeft, 'g')
+                plot(yLeft, xLeft,'r.') #Inverted
+                plot(ysLeft, xsLeft, 'g') #Inverted
 
+            # Get contact angle
             caL = np.arctan(mL)*180/np.pi
+            if caL < 0: caL = 180+caL
 
         if xRight != [] and len(xRight) > self.minFitPoints:
             makePlot = True
@@ -199,30 +229,31 @@ class getContactAngle():
             # Same as above
             xRight = np.asarray(xRight)
             yRight = np.asarray(yRight)
-            coefRight = np.polyfit(xRight,yRight,3)
+            coefRight = np.polyfit(xRight,yRight,5)
             polyRight = np.poly1d(coefRight)
             xsRight = np.arange(xRight[0], xRight[-1], 0.1)
             ysRight = polyRight(xsRight)
             derivRight = polyRight.deriv()
-            mR = derivRight(xRight[-1])
+            mR = 1/derivRight(xRight[0]+self.derivOffset)
             
             if self.debug:
-                bR = yRight[-1] - mR*xRight[-1]
+                bR = xRight[0] - mR*yRight[0]
                 x1R,y1R = (-1000, mR*-1000+bR)
                 x2R,y2R = (1000, mR*1000+bR)
                 plot((x1R,x2R),(y1R,y2R),'b')
-                plot(xRight,yRight,'r.')
-                plot(xsRight, ysRight, 'g')
+                plot(yRight,xRight,'r.')
+                plot(ysRight, xsRight, 'g')
 
-            caR = np.arctan(-1*mR)*180/np.pi
-
+            caR = -1*np.arctan(mR)*180/np.pi
+            if caR < 0: caR = 180+caR 
+              
         # Only generate plots in debug mode
         if makePlot and self.debug:
-            axhline(self.h-self.bed)
+            axhline(self.bed) ### I may be inverted as well as rotated oh well
             fileName = self.workDir + "plt-" + count + ".png"
             
-            xlim(self.w/2-100,self.h/2+100) # 87-287
-            ylim(self.h-self.bed-10,self.h+10) # 135-240
+            xlim(self.w/2-120,self.w/2+120) # 67-307
+            ylim(self.bed-20,self.h-40) # 88-250
             title(fileName, size=8)
     
             savefig(fileName, dpi=self.dpi, papertype='b10', 
@@ -230,18 +261,7 @@ class getContactAngle():
         
             clf() # Clear figure
         
-        if xLeft != [] and xRight != []:
-            radius = max(xRight) - min(xLeft)
-        elif xLeft != []:
-            # Radius with estimated syringe width
-            radius = max(xLeft) - min(xLeft) + self.sygOffset*2 + 4
-        elif xRight != []:
-            # Radius with estimated syringe width
-            radius = max(xRight) - min(xRight) + self.sygOffset*2 + 4
-        else:
-            radius = None
-        
-        return radius,caL,caR 
+        return caL,caR 
 
 
 
@@ -262,7 +282,12 @@ class getContactAngle():
         done = False
         
         for i,pxVal in enumerate(np.nditer(img[0])):
-    
+
+            # Basically don't start looking until at least 120 px
+            # This avoids noise in the top left corner.
+            if i < self.syringMinPos:
+                continue
+
             # Condition for finding left side of syringe
             if pxVal < 30 and syringeFound == False: 
     
@@ -283,7 +308,7 @@ class getContactAngle():
             # Condition for finding right side of syringe
             if pxVal > 220 and syringeFound == True:
     
-                # Look at every point distance 3 from syringe to distance 100
+                # Look at every point distance sygOffset to bubMax
                 for k in xrange(i+self.sygOffset,i+self.bubMax,1):
                     j = self.findBubbleEdge(img_T[k])
                     if j:
@@ -301,12 +326,61 @@ class getContactAngle():
             if done: 
                 break
         
-        # Return contact angles or none if no data points found (caL,caR)   
-        return self.fitContactAngle(xLeft, yLeft, xRight, yRight, count)
+        # X is a function of Y, Y is a relation of X
+        xFromLeft = [] # Actually a y value but becomes x viewed from left
+        yFromLeft = [] # Actually an x value but becomes y viewed from left
+        xFromRight = [] # Actually a y value but becomes x viewed from right
+        yFromRight = [] # Actually an x value but becomes y viewed from right
+        
+        # Fit horizontally using an offset derived from xLeft yLeft
+        # iterate over rows from BED up to highest bubble point
+        if xLeft != [] and len(xLeft) > self.minFitPoints:
+            for x in xrange(self.bed+1,(self.h-max(yLeft)),-1):  
+                
+                y = self.findBubbleEdge(img[x][min(xLeft)-5:], False)
+                y = y + min(xLeft)-5
+                
+                xFromLeft.append(230-x)
+                yFromLeft.append(y)
+
+        ### Major issue encountered here
+        # For some reason you must do this assignment, you cannot do all 
+        # these operations and [::-1] in the same line. Also np.nditer only 
+        # iterates in one direction no matter what you send it... 
+        # very confusing implementation.
+        if xRight != [] and len(xRight) > self.minFitPoints:
+            for x in xrange(self.bed+1,(self.h-max(yRight)),-1):
+                
+                array = img[x][:max(xRight)+5] 
+                
+                # Send reversed array because you need look from right
+                y = self.findBubbleEdge(array[::-1], False)
+                y = max(xRight)-y+5
+                
+                xFromRight.append(230-x)
+                yFromRight.append(y)        
+
+        # Estimate diameter of bubble
+        if xLeft != [] and xRight != []:
+            diameter = max(xRight) - min(xLeft)
+        elif xLeft != []:
+            # diameter with estimated syringe width
+            diameter = max(xLeft) - min(xLeft) + self.sygOffset*2 + 4
+        elif xRight != []:
+            # diameter with estimated syringe width
+            diameter = max(xRight) - min(xRight) + self.sygOffset*2 + 4
+        else:
+            diameter = None
+
+        caL, caR = self.fitContactAngle(xFromLeft, yFromLeft, xFromRight, 
+                                            yFromRight, count)
+
+        # Return data or none if no data points found (diameter, caL, caR)   
+        return diameter, caL, caR
 
 
     # mouse callback function
-    def filterImg(self, img, rot_Matrx, imgNum):
+    def filterImg(self, img, rot_Matrx, imgNum, makePlot=True):
         """Filters and saves every Nth image in a video with getContactAngle()
         
         Input:
@@ -338,7 +412,7 @@ class getContactAngle():
         img = cv2.add(img,self.br)
         r,img = cv2.threshold(img,self.th,255,cv2.THRESH_BINARY)
         
-        if self.debug: # Save debugging image
+        if self.debug and makePlot: # Save debugging image
             img_Nom = cv2.cvtColor(img_Nom,cv2.COLOR_BGR2GRAY) 
             img_Debug = np.hstack((img,img_Nom))     
             cv2.imwrite(self.workDir+imgNum+'.png', img_Debug)
@@ -364,16 +438,40 @@ class getContactAngle():
         rightAngles = []
         leftFrames = []
         rightFrames = []
-        radii = []
-        radiusFrames = []
+        diameters = []
+        diameterFrames = []
         makePlot = False
         
         # Start log file
         logPath = self.workDir + 'data.csv'
         logFile = open(logPath, 'wb')
-        log = csv.writer(logFile, delimiter=',', quoting=csv.QUOTE_NONE)
-        log.writerow(['frameNumber','radius','leftCA','rightCA']) # Header
-        
+        log = csv.writer(logFile, delimiter=',', escapechar='|',
+                          quoting=csv.QUOTE_NONE)
+        # Headers
+        runParams = [
+                     'bed='+str(self.bed),
+                     'N='+str(self.n),
+                     'r='+str(self.r),
+                     'roi='+str(self.roi),
+                     'mask='+str(self.mask),
+                     'br='+str(self.br),
+                     'th='+str(self.th),
+                     'dpi='+str(self.dpi), 
+                     'debug='+str(self.debug),
+                     'resetbed='+str(self.resetbed),
+                     'syringeMinPos='+str(self.syringMinPos),
+                     'sygOffset='+str(self.sygOffset),
+                     'bubMax='+str(self.bubMax),
+                     'derivOffset='+str(self.derivOffset),
+                     'minFitPoints='+str(self.minFitPoints),
+                     'w='+str(self.w),
+                     'h='+str(self.h),
+                     'assignBeds='+str(self.assignBeds), 
+                      ]
+  
+        log.writerow(runParams)
+        log.writerow(['frameNumber','diameter','leftCA','rightCA', 'bed']) 
+                
         # Rotation matrix centered in self.roi and rotated by self.r degrees
         x_cent = int((self.roi[0]+self.roi[1])/2)
         y_cent = int((self.roi[2]+self.roi[3])/2)
@@ -394,10 +492,10 @@ class getContactAngle():
                 img = self.filterImg(frame, rot_Matrx, imgNum)
                 
                 # Get contact angles and plot results 
-                radius, caL, caR = self.findSyringeEdge(img, img.T, imgNum)
+                diameter, caL, caR = self.findSyringeEdge(img, img.T, imgNum)
 
                 if self.debug:           
-                    print imgNum, radius, caL, caR
+                    print imgNum, diameter, caL, caR
                 
                 # Append to lists for plots later
                 if caL:
@@ -406,12 +504,12 @@ class getContactAngle():
                 if caR:
                     rightAngles.append(caR)
                     rightFrames.append(count)
-                if radius:
-                    radii.append(radius)
-                    radiusFrames.append(count)
+                if diameter:
+                    diameters.append(diameter)
+                    diameterFrames.append(count)
                 
                 # Output data to log file
-                log.writerow([count,radius,caL,caR])
+                log.writerow([count, diameter, caL, caR, self.bed])
                      
             if count > self.vef or not ret:
                 cap.release()
@@ -422,9 +520,9 @@ class getContactAngle():
         logFile.close() # Close your log file
 
         # Plot 
-        if radii != []:
+        if diameters != []:
             makePlot = True
-            plot(radiusFrames, radii, 'g')
+            plot(diameterFrames, diameters, 'g')
         
         if leftAngles != []:
             makePlot = True
@@ -435,18 +533,28 @@ class getContactAngle():
             plot(rightFrames,rightAngles,'b')
             
         if makePlot:
-            ylabel('ContactAngle (Degrees), Radius (Px)', size=8)
+            ylabel('ContactAngle (Degrees), diameter (Px)', size=8)
             xlabel('Image Number', size=8)
-            title('TEST001 Contact Angle & Radius vs Image Number', size=8)
+            title('TEST001 Contact Angle & diameter vs Image Number', size=8)
             p1 = plt.Rectangle((0, 0), 1, 1, fc='g')
             p2 = plt.Rectangle((0, 0), 1, 1, fc='r')
             p3 = plt.Rectangle((0, 0), 1, 1, fc='b')
-            legend([p1,p2,p3], ['radius','leftCA','rightCA'], 
+            legend([p1,p2,p3], ['diameter','leftCA','rightCA'], 
                    loc=1,prop={'size':8})
                     
             savefig(self.workDir+'data.png', dpi=400, papertype='b10', 
                     orientation='portrait', bbox_inches='tight')
             clf() # Clear your figure
+        
+        # Average advancing contact angles
+        l = leftFrames
+        r = rightFrames
+        leftAvgList = leftAngles[l.index(240):l.index(270)]
+        rightAvgList = rightAngles[r.index(240):r.index(270)]
+        avgAdvCALeft = reduce(lambda x, y: x + y, leftAvgList)/25
+        avgAdvCARight = reduce(lambda x, y: x + y, rightAvgList)/25
+        
+        return max(diameters), avgAdvCALeft, avgAdvCARight
     
     def mouseCallback(self,event,x,y,flags,param):
         """ Mouse callback function, selects cursor point to populate self.bed
@@ -479,8 +587,8 @@ class getContactAngle():
             cv2.line(img, (-1000,h), (1000,h), (0,0,0))
             cv2.imshow(windowName, img)
             img = imgDefault
-            k = cv2.waitKey(1000) & 0xFF # Basically delay 1000 ms
-            print 'BED is currently: ', self.bed
+            k = cv2.waitKey(4) & 0xFF # Basically delay 1000 ms
+            #print 'BED is currently: ', self.bed
             if k == 27: # Press escape to exit
                 break
             
@@ -513,29 +621,16 @@ class getContactAngle():
         # Start reading input video
         cap = cv2.VideoCapture(self.vidPath)
         
-        # Really inefficient way to find video mid point
-        while True:
-            ret, frame = cap.read()
-            if count > self.vef or not ret:
-                cap.release()
-                break
-            count += 1
-        
-        # Now call userSelectedBED on correct frame
-        midPoint = int(count/2)
-        count = 0
-        cap = cv2.VideoCapture(self.vidPath)
-        
         # User selects BED from filtered image
         while True:
             ret, frame = cap.read()
-            # If frameNum/N=0 is returned do analysis
             
-            if count == midPoint:          
-                imgNum = string.zfill(midPoint,4)
+            if count == 250: #Arbitrary mid point         
+                imgNum = '0250'
                 # Filter image and get BED
-                img = self.filterImg(frame, rot_Matrx, imgNum)
+                img = self.filterImg(frame, rot_Matrx, imgNum, makePlot=False)
                 self.userSelectBed(img)
+                break
             
             if count > self.vef or not ret:
                 cap.release()
@@ -544,15 +639,33 @@ class getContactAngle():
             count += 1
          
         # Rename file so this doesn't need to happen again
-        if self.resetbed: # Remove _BED###.MOV
-            bedName = self.vidPath[:-11]+'_BED'+str(self.bed)+'.MOV'
+        if self.resetbed and '_BED' in self.vidPath: # Remove _BED###.MOV
+            name = self.vidPath.split('_BED')
+            bedName = name[0]+'_BED'+str(self.bed)+'.MOV'
         else: # Remove .MOV
             bedName = self.vidPath[:-4]+'_BED'+str(self.bed)+'.MOV'
-        print 'Renaming: ', self.vidPath
-        print 'New Name: ', bedName
-        os.rename(self.vidPath, bedName)
-        self.vidPath = bedName
+
+        if self.vidPath != bedName:
+            print 'Renaming: ', self.vidPath
+            print 'New Name: ', bedName
+            os.rename(self.vidPath, bedName)
+            self.vidPath = bedName
+        else:
+            print 'Not renaming, BED unchanged.'
+            print 'Name: ', self.vidPath
+            print 'New Name: ', bedName
+    
+    def removeBED(self):
+        """ Remove _BED from file names
+        """
         
+        # Rename file so this doesn't need to happen again
+        if '_BED' in self.vidPath: # Remove _BED###.MOV
+            name = self.vidPath.split('_BED')
+            bedName = name[0]+'.MOV'
+            print 'Renaming: ', self.vidPath
+            print 'New Name: ', bedName
+            os.rename(self.vidPath, bedName)
     
     def run(self):
         """ Executes getContactAngle on an individual video or recursively over 
@@ -594,18 +707,39 @@ class getContactAngle():
             self.measureVideo()
             
         else: # Directory given, use os.walk
+            
+            mlPath = 'D:\\GitHub\\AFCC Metal FSU Testing 2014\\masterLog.csv'
+            print 'Saving master data to: ', mlPath
+            masterLogFile = open(mlPath, 'wb')
+            mlog = csv.writer(masterLogFile, delimiter=',', 
+                              quoting=csv.QUOTE_NONE)
+            mlog.writerow(self.headers)
+            
             for (root, subFolders, files) in os.walk(self.path):
                 #Second condition forces this to run in only the index dir
                 for item in files:
+                    
                     if '.MOV' in item:
                         
-                        if 'FIX' in item: continue # Ignore pre-filtered video
-                        
+                        if 'FIX' in item: continue # Ignore pre-filtered video                        
                         self.vidPath = root+'\\'+item
-                        self.workDir = root+'\\'+item[:-4]+'\\'
-                        print 'Analyzing: ', self.vidPath
+
+                        # Only remove _BED from file names
+                        if self.removeBeds:
+                            print 'Remove BEDs.'
+                            self.removeBED()
+                            continue
                         
-                        self.getBED() # Pull BED from filename or ask user
+                        # Only assign beds no analysis
+                        if self.assignBeds: 
+                            print 'Assigning BEDs.'
+                            self.getBED() # Pull BED from filename or ask user
+                            continue
+                        else:
+                            self.getBED()
+                        
+                        print 'Analyzing: ', self.vidPath
+                        self.workDir = self.vidPath[:-4]+'\\' # Remove .MOV
                         
                         if os.path.isdir(self.workDir) and not self.debug:
                             print 'Deleting: ', self.workDir
@@ -615,12 +749,25 @@ class getContactAngle():
                             print 'Making: ', self.workDir
                             os.mkdir(self.workDir)
                         
-                        self.measureVideo()
-    
+                        # Get averaged values for things we car about
+                        d,caL,caR = self.measureVideo()
+                        
+                        # Splits 20140805-12_49_15-CA7_L002A_02_BED140.MOV
+                        # to ['CA7', 'L002A', '02', 'BED140.MOV']
+                        info = item.split('-')[2].split('_')
+                        
+                        # Log filename, folderID, fabID, sample#, region,
+                        # run#, caL, caR, diameter, bed
+                        row = [item, info[0], info[1][:-4], info[1][-4:-1],
+                               info[1][-1], caL, caR, d, self.bed]
+            
+                        mlog.writerow(row)
+            
+            masterLogFile.close()
 
 
 if __name__ == '__main__':
-    gCA = getContactAngle(vars)
+    gCA = getContactAngle(vars, headers)
     gCA.run()
 
 """
