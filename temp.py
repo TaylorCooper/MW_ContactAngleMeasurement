@@ -17,3 +17,8 @@
 			cv2.imwrite(outPath+imgNum+'.png', img_Debug)
 		else:
 			cv2.imwrite(outPath+imgNum+'.png', img_Color)
+			
+		# Possible compression formats: M J P G, P I M 1, I 4 2 0
+        # Translation: Mjpg, i dont know, uncompressed avi
+        video = cv2.VideoWriter(outName, cv2.cv.CV_FOURCC('P','I','M','1'),
+                                25,(self.w,self.h))

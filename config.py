@@ -1,8 +1,8 @@
 """
-    Author:
+    Author=
         Taylor Cooper
-    Description:
-        Load inputs for main:
+    Description=
+        Load inputs for main=
         PATH - videoPath/filePath - a single .MOV or file structure with .MOVs
         VSF - video start frame - Starting frame for analysis
         VEF - video end frame - Ending frame for analysis
@@ -14,35 +14,36 @@
         TH - threshold - Value used to binary threshold images
         BED - bubble edge depth - (BED) Interface between bubble and surface
                         
-    Date Created:
-        Aug 4, 2014 7:07:07 PM
+    Date Created=
+        Aug 4, 2014 7=07=07 PM
     
-    Arguments and Inputs:
+    Arguments and Inputs=
         None
-    Outputs:
+    Outputs=
         None
-    Dependencies:
+    Dependencies=
         None
                   
-    History:                  
+    History=                  
     --------------------------------------------------------------
-    Date:    
-    Author:    Taylor Cooper
-    Modification:    
+    Date=    
+    Author=    Taylor Cooper
+    Modification=    
      --------------------------------------------------------------
 """
             
-params = {
-    'PATH' : 'D:\\GitHub\\workspace\\A2_work\\SampleAnalysis\\',
-    'VSF' : 80,
-    'VEF' : 660,
-    'N' : 10,
-    'R' : 2,
-    'ROI' : (850,1080,800,1175), # row_min, row_max, col_min, col_max
-    'MASK' : (90,280,255), # col_min, col_max, value outside mask
-    'BR' : 90,
-    'TH' : 160,
-    'BED' : 150, # row (0 is at top of image)
-    'W' : vars['ROI'][3]-vars['ROI'][2],
-    'H' : vars['ROI'][1]-vars['ROI'][0]
-}
+params = dict(
+    # Always provide the trailing \\ for 'PATH' if it's a file path
+    PATH = "D=\\GitHub\\workspace\\A2_work\\SampleAnalysis\\",
+    VSF = 80,
+    VEF = 660,
+    N = 10,
+    R = 2,
+    ROI = (850,1080,800,1175), # row_min, row_max, col_min, col_max
+    MASK = (90,280,255), # col_min, col_max, value outside mask
+    BR = 90,
+    TH = 160,
+    DEBUG = True,
+    RESETBED = False
+)
+
