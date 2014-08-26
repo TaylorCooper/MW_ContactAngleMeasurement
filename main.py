@@ -67,26 +67,61 @@
 
 import numpy as np
 import cv2, os, string, shutil, csv, time, sys
+import matplotlib.pyplot as plt
 from pylab import * # plotting tools
 import config
 
 # Video config file variables
-varsVid = {
+varsCA1237 = {
     # Always provide the trailing \\ for 'PATH' if it's a filepath
-    'PATH' : 'D:\\GitHub\\AFCC Metal FSU Testing 2014\\20140808_Dataset_CA1\\',
-    'VSF' : 100,
-    'VEF' : 1500,
-    'N' : 5,
-    'R' : 2,
+    'PATH' : 'D:\\_Work\\0000-AFCC_MetalFSU_A2\\20140808_Dataset\\Rerun1\\',
+    'VSF' : 100, # Minimum image
+    'VEF' : 30000, # Set high for CA7
+    'N' : 5, # Read ever Nth image
+    'R' : 2, # Rotation
     'ROI' : (750,1080,800,1175), # row_min, row_max, col_min, col_max
     'MASK' : (30,340,255), # col_min, col_max, value outside mask
+    'BR' : 90, # Brightness added
+    'TH' : 180, # Threshold value for binary threshold
+    'POLYDEG' : 5, # Polyfit degree
+    'DERIVOFF' : 5, # Offset from bed for taking derivative
+    'MINSYGPOS' : 120, # Minimum distance from left side of image to syringe
+    'SYGOFF' : 6, # Number of pixels to offset from syringe after finding it
+    'VIDMID' : 250, # Middle of video used to generate BED image
+    'BUBMAX' : 600, # Max bubble diameter (no idea why I set this)
+    'MINFITPTS' : 12, # Minimum points required to attempt a fit
+    'DPI' : 100, # plot quality (lower = faster)
+    'PLOTXOFF' : 120, # Graph offsets from image center 
+    'PLOTYOFF' : -40, # Graph offsets
+    'DEBUG' : False, # Plots and saves images
+    'RESETBED' : False, # Will ignore _BED if present
+    'ASSIGNBEDS' : False, # Will ignore analysis and assign beds
+    'REMOVEBEDS' : False, # Will ignore assignBeds/analysis and remove _BED
+}
+
+varsCA8 = {
+    # Always provide the trailing \\ for 'PATH' if it's a filepath
+    'PATH' : 'D:\\_Work\\0000-AFCC_MetalFSU_A2\\Runs\\Example\\',
+    'VSF' : 100,
+    'VEF' : 30000, # Set high for CA7
+    'N' : 5,
+    'R' : 2,
+    'ROI' : (480,730,750,1250), # For CA8 rerun
+    'MASK' : (30,440,255), # For CA8 rerun
     'BR' : 90,
     'TH' : 180,
     'POLYDEG' : 5,
     'DERIVOFF' : 10,
+    'MINSYGPOS' : 120,
+    'SYGOFF' : 6,
+    'VIDMID' : 250,
+    'BUBMAX' : 600,
+    'MINFITPTS' : 12,
     'DPI' : 100, # plot quality (lower = faster
+    'PLOTXOFF' : 250, # Graph offsets from image center 
+    'PLOTYOFF' : 120, # Graph offsets
     'DEBUG' : True, # Plots and saves images
-    'RESETBED' : False, # Will ignore _BED if present
+    'RESETBED' : True, # Will ignore _BED if present
     'ASSIGNBEDS' : False, # Will ignore analysis and assign beds, responds to RESETBED
     'REMOVEBEDS' : False, # Will ignore assignBeds and analysis and remove _BED
 }
@@ -104,19 +139,51 @@ headersVid = [
           ]
 
 # Tilt Angle config file variables
-varsImg = {
+varsImgTilt = {
     # Always provide the trailing \\ for 'PATH' if it's a filepath
     'PATH' : 'D:\\_Work\\0000-AFCC_MetalFSU_A2\\20140810_TiltPhotos\\Derv10_Poly8\\',
     'R' : 2,
     'BR' : 130,
     'TH' : 190,
     'POLYDEG' : 8,
-    'DERIVOFF' : 10, # Or 20 in some cases    
+    'DERIVOFF' : 10, # Or 20 in some cases   
+    'MINSYGPOS' : 120,
+    'SYGOFF' : 6,
+    'BUBMAX' : 600,
+    'MINFITPTS' : 12,
     'DPI' : 100, # plot quality (lower = faster
+    'PLOTXOFF' : 500, # Graph offsets from image center 
+    'PLOTYOFF' : 240, # Graph offsets
     'DEBUG' : True, # Plots and saves images
     'RESETBED' : False, # Will ignore _BED if present
     'ASSIGNBEDS' : False, # Will ignore analysis and assign beds, responds to RESETBED
     'REMOVEBEDS' : False, # Will ignore assignBeds and analysis and remove _BED
+}
+
+varsImgStatic = {
+    # Always provide the trailing \\ for 'PATH' if it's a filepath
+    'PATH' : 'D:\\_Work\\0000-AFCC_MetalFSU_A2\\20140808_Dataset\\Static_Measurements\\3DS\\',
+    'VSF' : None,
+    'VEF' : None, # Set high for CA7
+    'N' : None,
+    'R' : 2,
+    'ROI' : (1700,2000,2275,2700), # ??
+    'MASK' : (50,375,255), # For static measurements
+    'BR' : 50,
+    'TH' : 160,
+    'POLYDEG' : 5,
+    'DERIVOFF' : 10,
+    'MINSYGPOS' : 120,
+    'SYGOFF' : 6,
+    'BUBMAX' : 600,
+    'MINFITPTS' : 12,
+    'DPI' : 100, # plot quality (lower = faster
+    'PLOTXOFF' : 250, # Graph offsets from image center 
+    'PLOTYOFF' : -40, # Graph offsets
+    'DEBUG' : True,
+    'RESETBED' : False,
+    'ASSIGNBEDS' : False,
+    'REMOVEBEDS' : False,
 }
 
 headersImg = [
@@ -154,6 +221,7 @@ class getContactAngle():
             self.n = configurables['N']
             self.roi = configurables['ROI']
             self.mask = configurables['MASK']
+            self.vidMid = configurables['VIDMID']
             
             # Internal Parameters
             self.w = self.roi[3] - self.roi[2]
@@ -162,7 +230,7 @@ class getContactAngle():
             self.w = None
             self.h = None
 
-            
+        # External parameters
         self.path = configurables['PATH']
         self.r = configurables['R']
         self.br = configurables['BR']
@@ -171,19 +239,20 @@ class getContactAngle():
         self.derivOffset = configurables['DERIVOFF'] # Default 10 for videos     
         self.dpi = configurables['DPI']
         self.debug = configurables['DEBUG']
+        self.plotXOff = configurables['PLOTXOFF']
+        self.plotYOff = configurables['PLOTYOFF']
         self.resetbed = configurables['RESETBED']
         self.assignBeds = configurables['ASSIGNBEDS']
         self.removeBeds = configurables['REMOVEBEDS']
+        self.syringMinPos = configurables['MINSYGPOS']
+        self.sygOffset = configurables['SYGOFF']
+        self.bubMax = configurables['BUBMAX']
+        self.minFitPoints = configurables['MINFITPTS']
         self.headers = masterLogHeaders
         
         # Internal parameters
         self.workDir = None
         self.itemPath = None
-        self.syringMinPos = 120
-        self.sygOffset = 6 
-        self.bubMax = 600
-        self.minFitPoints = 12
-
         
         # Human input parameters, warning this value changes with the roi
         self.bed = None
@@ -230,8 +299,8 @@ class getContactAngle():
             if self.debug:
                 # Get CA lines to plot
                 bL = xLeft[0] - mL*yLeft[0] # Also inverted
-                x1L,y1L = (-1000, mL*-1000+bL)
-                x2L,y2L = (1000, mL*1000+bL)
+                x1L,y1L = (-10000, mL*-10000+bL)
+                x2L,y2L = (10000, mL*10000+bL)
                 
                 # Plot lines
                 plot((x1L,x2L),(y1L,y2L),'b')
@@ -271,12 +340,8 @@ class getContactAngle():
             axhline(self.h - self.bed) 
             fileName = self.workDir + count + "-plt.svg"
             
-            if self.isVideo: # If video
-                xlim(self.w/2-120,self.w/2+120) # 67-307
-                ylim(self.h-self.bed-20,self.h-40) # 40-250
-            else: # If tilt image
-                xlim(self.w/2-500,self.w/2+500) # Wider
-                ylim(self.h-self.bed-20,self.h+240) # Same
+            xlim(self.w/2-self.plotXOff,self.w/2+self.plotXOff)
+            ylim(self.h-self.bed-20,self.h+self.plotYOff)
             title(fileName, size=8)
     
             savefig(fileName)#, dpi=self.dpi, papertype='b10', 
@@ -329,7 +394,11 @@ class getContactAngle():
             # Condition for finding left side of syringe
             if pxVal < 30 and syringeFound == False: 
     
-                # Look at every point distance 3 from syringe to distance 100
+                # Set left bound for indexing
+                leftMin = i - self.bubMax
+                if leftMin < 0: leftMin=0    
+    
+                # Look at every point distance 3 from syringe to bubMax
                 for k in xrange(i-self.sygOffset,i-self.bubMax,-2):
                     
                     # Basically break loop if you are getting near image edge
@@ -349,6 +418,10 @@ class getContactAngle():
     
             # Condition for finding right side of syringe
             if pxVal > 220 and syringeFound == True:
+
+                # Set right bound for indexing
+                rightMax = i + self.bubMax
+                if rightMax > self.w: rightMax = self.w
     
                 # Look at every point distance sygOffset to bubMax
                 for k in xrange(i+self.sygOffset,i+self.bubMax,2):
@@ -451,26 +524,25 @@ class getContactAngle():
         if self.isVideo: # Basically if you're not processing a video
             rows,cols,channels = img.shape
             
+            if rows < self.roi[1] or cols < self.roi[3]:
+                print 'Warning:: ROI larger then image ', imgNum
+            
             # Rotate and crop image based on self.r / self.roi
             img = cv2.warpAffine(img,rot_Matrx,(cols,rows))
             # Crop to self.roi [row_min:row_max, col_min:col+max] 
-            img_Nom = img[self.roi[0]:self.roi[1],self.roi[2]:self.roi[3]]           
+            img_Nom = img[self.roi[0]: self.roi[1], self.roi[2]: self.roi[3]]
             
             # Gray scale and apply a mask to remove unnecessary points
             img = cv2.cvtColor(img_Nom,cv2.COLOR_BGR2GRAY) # convert to GS
             mask = np.zeros([self.h,self.w], np.uint8)
             mask[:,:self.mask[0]] = self.mask[2]
             mask[:,self.mask[1]:] = self.mask[2]
+
             img = cv2.add(img,mask)
-    
+
             # Brighten all pixels then apply binary threshold
             img = cv2.add(img,self.br)
-            r,img = cv2.threshold(img,self.th,255,cv2.THRESH_BINARY)
-            
-            # Video specific parameters for debug plotting
-            savePath = self.workDir+imgNum+'.png'
-            img_Nom = cv2.cvtColor(img_Nom,cv2.COLOR_BGR2GRAY)
-            img_Debug = np.hstack((img,img_Nom))              
+            r,img = cv2.threshold(img,self.th,255,cv2.THRESH_BINARY)      
         else:
             # Filter
             img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
@@ -492,7 +564,11 @@ class getContactAngle():
             img_Debug = img
         
         if self.debug and makePlot: # Save debugging image 
-   
+            if self.isVideo:
+                # Video specific parameters for debug plotting
+                img_Nom = cv2.cvtColor(img_Nom,cv2.COLOR_BGR2GRAY)
+                img_Debug = np.hstack((img,img_Nom))   
+                savePath = self.workDir+imgNum+'.png'
             cv2.imwrite(savePath, img_Debug)
         
         return img
@@ -629,28 +705,33 @@ class getContactAngle():
             count += 1
 
         logFile.close() # Close your log file
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax2 = ax.twinx()
 
         # Plot 
         if diameters != []:
             makePlot = True
-            plot(diameterFrames, diameters, 'g')
+            ax2.plot(diameterFrames, diameters, 'g')
         
         if leftAngles != []:
             makePlot = True
-            plot(leftFrames,leftAngles,'r')
+            ax.plot(leftFrames,leftAngles,'r')
             
         if rightAngles != []:
             makePlot = True
-            plot(rightFrames,rightAngles,'b')
+            ax.plot(rightFrames,rightAngles,'b')
             
         if makePlot:
-            ylabel('ContactAngle (Degrees), diameter (Px)', size=8)
-            xlabel('Image Number', size=8)
-            title('TEST001 Contact Angle & diameter vs Image Number', size=8)
+            ax.set_ylabel('ContactAngle (Deg)', size=8)
+            ax.set_xlabel('Image Number', size=8)
+            ax2.set_ylabel('Diameter (Px)', size=8)
+            ax.set_title('Contact Angle (Deg) & Diameter (Px) vs. Image Number', 
+                  size=8)
             p1 = plt.Rectangle((0, 0), 1, 1, fc='g')
             p2 = plt.Rectangle((0, 0), 1, 1, fc='r')
             p3 = plt.Rectangle((0, 0), 1, 1, fc='b')
-            legend([p1,p2,p3], ['diameter','leftCA','rightCA'], 
+            ax.legend([p1,p2,p3], ['Diameter','Left CA','Right CA'], 
                    loc=1,prop={'size':8})
             
             plotPath = self.workDir + name + '_data.png'
@@ -702,7 +783,7 @@ class getContactAngle():
             
         cv2.destroyAllWindows()
         
-    def getBED(self):
+    def getBED(self, img=None, imgSent=False):
         """Attempts to pull BED from file name else prompts user to select it.
         
         Input: videoPath
@@ -727,6 +808,8 @@ class getContactAngle():
             
             img = self.filterImg(img, None, None, makePlot=True)
             self.userSelectBed(img)
+        elif imgSent: # If filtered image supplied
+            self.userSelectBed(img)
         else: # Process as video
 
             count = 0
@@ -735,6 +818,7 @@ class getContactAngle():
             x_cent = int((self.roi[0]+self.roi[1])/2)
             y_cent = int((self.roi[2]+self.roi[3])/2)
             rot_Matrx = cv2.getRotationMatrix2D((x_cent,y_cent),self.r,1)
+            print self.r, rot_Matrx
             
             # Start reading input video
             cap = cv2.VideoCapture(self.itemPath)
@@ -743,7 +827,7 @@ class getContactAngle():
             while True:
                 ret, frame = cap.read()
                 
-                if count == 250: #Arbitrary mid point         
+                if count == self.vidMid: #Arbitrary mid point         
                     imgNum = '0250'
                     # Filter image and get BED
                     img = self.filterImg(frame, rot_Matrx, imgNum, 
@@ -832,11 +916,29 @@ class getContactAngle():
             masterLogFile = open(mlPath, 'wb')
             mlog = csv.writer(masterLogFile, delimiter=',', 
                               quoting=csv.QUOTE_NONE)
+            runParams = [
+                         'bed='+str(self.bed),
+                         'br='+str(self.br),
+                         'th='+str(self.th),
+                         'dpi='+str(self.dpi), 
+                         'debug='+str(self.debug),
+                         'resetbed='+str(self.resetbed),
+                         'assignBeds='+str(self.assignBeds),
+                         'syringeMinPos='+str(self.syringMinPos),
+                         'sygOffset='+str(self.sygOffset),
+                         'bubMax='+str(self.bubMax),
+                         'derivOffset='+str(self.derivOffset),
+                         'polyDeg='+str(self.polyDeg),
+                         'minFitPoints='+str(self.minFitPoints)
+                          ]
+            
+            mlog.writerow(runParams) 
             mlog.writerow(self.headers)
             
             for (root, subFolders, files) in os.walk(self.path):
                 #Second condition forces this to run in only the index dir
                 for item in files:
+                    print item
                     
                     if '.MOV' in item:
                         
@@ -889,8 +991,8 @@ class getContactAngle():
             masterLogFile.close()
 
 
-    def analyzeImages(self):
-        """Find contact angles from images
+    def analyzeTiltImages(self):
+        """Find contact angles from tilt images
         
         Input: configured gCA class
         
@@ -918,31 +1020,22 @@ class getContactAngle():
                      'dpi='+str(self.dpi), 
                      'debug='+str(self.debug),
                      'resetbed='+str(self.resetbed),
+                     'assignBeds='+str(self.assignBeds),
                      'syringeMinPos='+str(self.syringMinPos),
                      'sygOffset='+str(self.sygOffset),
                      'bubMax='+str(self.bubMax),
                      'derivOffset='+str(self.derivOffset),
                      'polyDeg='+str(self.polyDeg),
-                     'minFitPoints='+str(self.minFitPoints),
-                     'w='+str(self.w),
-                     'h='+str(self.h),
-                     'assignBeds='+str(self.assignBeds), 
+                     'minFitPoints='+str(self.minFitPoints)
                       ]
         
-        mlog.writerow(runParams)
-        
+        mlog.writerow(runParams)    
         mlog.writerow(self.headers)
-        
-
         
         for (root, subFolders, files) in os.walk(self.path):
             #Second condition forces this to run in only the index dir
             for item in files:
                 
-                # Prevent oswalk from visiting subfolders:
-#                 wRoot = 'D:\\_Work\\0000-AFCC_MetalFSU_A2\\20140810_TiltPhotos\\'
-#                 if root != wRoot:
-#                     continue
                 if '-fltrd' in item: # ignore filtered images
                     continue
                 
@@ -971,9 +1064,7 @@ class getContactAngle():
                     # Load and filter images
                     img = cv2.imread(self.itemPath)
                     img = self.filterImg(img,None,None)
-                    
 
-                    
                     # Use algo to measure CA's
                     name = item[:-4]
                     d, caL, caR = self.findSyringeEdge(img, img.T, name)
@@ -991,13 +1082,133 @@ class getContactAngle():
         
         masterLogFile.close()
     
+    def analyzeStaticImages(self):
+        """Find contact angles from images
+        
+        Input: configured gCA class
+        
+        Output: calls many functions
+        
+        Note:  A lot of this reproduction is suggesting to me I need to a new 
+        class at this point that inherits gCA... but I'm not going to get into 
+        that now.
+        
+        """
+        
+        # Set up master log as usual
+        mlPath = 'D:\\_Work\\0000-AFCC_MetalFSU_A2\\masterLog_Tilt_'
+        ts = str(time.time())[2:-3] # Repeats at about 100 weeks
+        mlPath = mlPath + ts + '.csv'
+        print 'Saving master data to: ', mlPath
+        masterLogFile = open(mlPath, 'wb')
+        mlog = csv.writer(masterLogFile, delimiter=',', escapechar='|',
+                          quoting=csv.QUOTE_NONE)
+
+        runParams = [
+                     'bed='+str(self.bed),
+                     'br='+str(self.br),
+                     'th='+str(self.th),
+                     'dpi='+str(self.dpi), 
+                     'debug='+str(self.debug),
+                     'resetbed='+str(self.resetbed),
+                     'assignBeds='+str(self.assignBeds),
+                     'syringeMinPos='+str(self.syringMinPos),
+                     'sygOffset='+str(self.sygOffset),
+                     'bubMax='+str(self.bubMax),
+                     'derivOffset='+str(self.derivOffset),
+                     'polyDeg='+str(self.polyDeg),
+                     'minFitPoints='+str(self.minFitPoints)
+                      ]
+        
+        mlog.writerow(runParams)    
+        mlog.writerow(self.headers)
+        
+        for (root, subFolders, files) in os.walk(self.path):
+            #Second condition forces this to run in only the index dir
+            for item in files:
+                
+                if '-fltrd' in item: # ignore filtered images
+                    continue
+                
+                
+                if '.jpg' in item or '.png' in item or '.JPG' in item:
+                    
+                    self.itemPath = root+'\\'+item
+                    self.workDir = root+'\\'
+                    name = item[:-4]
+                    
+                    print 'Analyzing: ', self.itemPath
+
+                    # Rotation matrix centered in self.roi 
+                    x_cent = int((self.roi[0]+self.roi[1])/2)
+                    y_cent = int((self.roi[2]+self.roi[3])/2)
+                    rot_Matrx = cv2.getRotationMatrix2D((x_cent,y_cent),
+                                                        self.r,1)
+
+                    # Load and filter images
+                    img = cv2.imread(self.itemPath)
+                    img = self.filterImg(img, rot_Matrx, name+'-fltrd')
+
+                    # Add syringe reference point
+                    mask = np.zeros([self.h,self.w], np.uint8)
+                    colMax = int(self.w/2 + 2)
+                    colMin =  int(self.w/2 -2)
+                    mask[0:5,colMin:colMax] = 255
+                    img = cv2.subtract(img,mask)
+
+                    # Only remove _BED from file names
+                    if self.removeBeds:
+                        print 'Remove BEDs.'
+                        self.removeBED(img, True)
+                        continue
+                    
+                    # Only assign beds no analysis
+                    if self.assignBeds: 
+                        print 'Assigning BEDs.'
+                        self.getBED(img, True) # Pull BED from filename or ask user
+                        continue
+                    else:
+                        self.getBED(img, True)
+                        
+                    if self.bed > self.h:
+                        print 'Warning:: bed > h |', self.bed,'>',self.h 
+
+                    # Use algo to measure CA's
+                    d, caL, caR = self.findSyringeEdge(img, img.T, name)
+                    print d, caL, caR # caL = receding, caR = advancing
+                     
+                    mat = item.split('_')[3] # Material
+                    tiltAngle = int(item.split('Rotate')[1].split('_')[0])
+                    idx = 'idx-'+item.split('_')[4]
+                    test = item.split('_')[-2]
+                    print 'idx-'+item.split('_')[4]
+                    row = [item, mat, idx, tiltAngle, test, caL, caR, d,
+                            self.bed]
+                                        
+                    # Write data row to master log file
+                    # Flush to prevent data loss in crash
+                    mlog.writerow(row)
+                    masterLogFile.flush() 
+        
+        masterLogFile.close()
+
 
 if __name__ == '__main__':
-#     gCAVid = getContactAngle(varsVid, headersVid)
-#     gCAVid.analyzeVideos()
     
-    gCATilt = getContactAngle(varsImg, headersImg, isVideo=False)
-    gCATilt.analyzeImages()
+    doThis = 1
+    
+    if doThis == 1:
+        # Run for videos
+        gCAVid = getContactAngle(varsCA8, headersVid)
+        gCAVid.analyzeVideos()
+    elif doThis == 2:
+        # Run for tilt images
+        gCATilt = getContactAngle(varsImgTilt, headersImg, isVideo=False)
+        gCATilt.analyzeTiltImages()
+    elif doThis ==3:
+        # Run for static images, they pretend they are videos
+        gCAStat = getContactAngle(varsImgStatic, headersImg)
+        gCAStat.analyzeStaticImages()
 
 """
 NOTES:
