@@ -59,9 +59,9 @@
         
     History:                  
     --------------------------------------------------------------
-    Date:    
+    Date:    2015.01.07
     Author:    Taylor Cooper
-    Modification:    
+    Modification:    Fixed deriv offset, added max fit points
      --------------------------------------------------------------
 """
 
@@ -78,18 +78,19 @@ varsCA1237 = {
     'VSF' : 100, # Minimum image
     'VEF' : 30000, # Set high for CA7
     'N' : 5, # Read ever Nth image
-    'R' : 2, # Rotation
+    'R' : 2, # Rotation (positive is CCW)
     'ROI' : (750,1080,800,1175), # row_min, row_max, col_min, col_max
     'MASK' : (30,340,255), # col_min, col_max, value outside mask
     'BR' : 90, # Brightness added
     'TH' : 180, # Threshold value for binary threshold
     'POLYDEG' : 5, # Polyfit degree
-    'DERIVOFF' : 5, # Offset from bed for taking derivative
+    'DERIVOFF' : 5, # Offset from bed for taking derivative in pixels/10
     'MINSYGPOS' : 120, # Minimum distance from left side of image to syringe
     'SYGOFF' : 6, # Number of pixels to offset from syringe after finding it
     'VIDMID' : 250, # Middle of video used to generate BED image
     'BUBMAX' : 600, # Max bubble diameter (no idea why I set this)
     'MINFITPTS' : 12, # Minimum points required to attempt a fit
+    'MAXFITPTS' : 30, # Maximum points for fit attempt, prevents garbage pts.
     'DPI' : 100, # plot quality (lower = faster)
     'PLOTXOFF' : 120, # Graph offsets from image center 
     'PLOTYOFF' : -40, # Graph offsets
@@ -248,6 +249,7 @@ class getContactAngle():
         self.sygOffset = configurables['SYGOFF']
         self.bubMax = configurables['BUBMAX']
         self.minFitPoints = configurables['MINFITPTS']
+        self.maxFitPoints = configurables['MAXFITPTS']        
         self.headers = masterLogHeaders
         
         # Internal parameters
@@ -293,7 +295,7 @@ class getContactAngle():
             # calculation right at self.bed
             derivLeft = polyLeft.deriv()
             # Invert because rotating graph
-            mL = 1/derivLeft(xLeft[0]+self.derivOffset) 
+            mL = 1/derivLeft(xLeft[0+self.derivOffset]) 
 
             
             if self.debug:
@@ -322,7 +324,7 @@ class getContactAngle():
             xsRight = np.arange(xRight[0], xRight[-1], 0.1)
             ysRight = polyRight(xsRight)
             derivRight = polyRight.deriv()
-            mR = 1/derivRight(xRight[0]+self.derivOffset)
+            mR = 1/derivRight(xRight[0+self.derivOffset])
             
             if self.debug:
                 bR = xRight[0] - mR*yRight[0]
@@ -498,8 +500,13 @@ class getContactAngle():
         else:
             diameter = None
 
-        caL, caR = self.fitContactAngle(xFromLeft, yFromLeft, xFromRight, 
-                                            yFromRight, count)
+        # Make plots from points 0 to maxFitPoints
+        # This will remove syringes that appear due to bright points in their
+        # center, and other abnormalities at the top of the drop let
+        caL, caR = self.fitContactAngle(xFromLeft[:self.maxFitPoints], 
+                                        yFromLeft[:self.maxFitPoints], 
+                                        xFromRight[:self.maxFitPoints], 
+                                        yFromRight[:self.maxFitPoints], count)
 
         # Return data or none if no data points found (diameter, caL, caR)   
         return diameter, caL, caR
@@ -734,9 +741,9 @@ class getContactAngle():
             ax.legend([p1,p2,p3], ['Diameter','Left CA','Right CA'], 
                    loc=1,prop={'size':8})
             
-            plotPath = self.workDir + name + '_data.png'
-            savefig(plotPath, dpi=300, papertype='b10', 
-                    orientation='portrait', bbox_inches='tight')
+            plotPath = self.workDir + name + '_data.svg'
+            savefig(plotPath) #, dpi=300, papertype='b10', 
+                    #orientation='portrait', bbox_inches='tight')
             clf() # Clear your figure
         
         # Get average advancing contact angles
@@ -909,7 +916,7 @@ class getContactAngle():
         else: # Directory given, use os.walk
             
             # Set up a master log file, timestamp prevents overwriting
-            mlPath = 'D:\\_Work\\0000-AFCC_MetalFSU_A2\\masterLog_'
+            mlPath = 'F:\\AFCC Metal FSU Testing 2014\\A3\\masterLog_'
             ts = str(time.time())[2:-3] # timestamp
             mlPath = mlPath + ts + '.csv'
             print 'Saving master data to: ', mlPath
